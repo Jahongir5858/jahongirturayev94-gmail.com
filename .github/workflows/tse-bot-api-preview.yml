@@ -1,0 +1,125 @@
+name: Telegram Search Engine Bot API Preview
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - bot-api-search
+    paths:
+      - 'telegram_bot_api_collector.py'
+      - '.github/workflows/tse-bot-api-preview.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  preview:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    env:
+      BOT_TOKEN: ${{ secrets.TG_SEARCH_BOT_TOKEN }}
+      DATABASE_URL: postgresql://tgsearch:preview-postgres-9f3c7b1a@127.0.0.1:5432/tgsearch
+    steps:
+      - name: Checkout control repository
+        uses: actions/checkout@v4
+        with:
+          ref: bot-api-search
+
+      - name: Clone Telegram Search Engine
+        run: git clone --depth 1 https://github.com/Brooksolomon/Telegram-Search-Engine.git tse
+
+      - name: Configure preview environment
+        working-directory: tse
+        run: |
+          cat > .env.prod <<'EOF'
+          DOMAIN=localhost
+          POSTGRES_USER=tgsearch
+          POSTGRES_PASSWORD=preview-postgres-9f3c7b1a
+          POSTGRES_DB=tgsearch
+          MEILI_MASTER_KEY=preview-meili-5d8a2c4e
+          CORS_ORIGINS=http://localhost
+          NEXT_PUBLIC_REPO_URL=https://github.com/Brooksolomon/Telegram-Search-Engine
+          EOF
+
+      - name: Build and start search stack
+        working-directory: tse
+        run: |
+          docker compose -f docker-compose.yml -f docker-compose.ip.yml --env-file .env.prod up -d --build
+          docker compose -f docker-compose.yml -f docker-compose.ip.yml --env-file .env.prod ps
+
+      - name: Wait for web app and PostgreSQL
+        run: |
+          for i in {1..60}; do
+            if curl -fsS http://localhost/ >/dev/null 2>&1 && pg_isready -h 127.0.0.1 -p 5432 -U tgsearch -d tgsearch >/dev/null 2>&1; then
+              echo "Search stack is ready"
+              exit 0
+            fi
+            sleep 5
+          done
+          cd tse
+          docker compose -f docker-compose.yml -f docker-compose.ip.yml --env-file .env.prod logs --tail=200
+          exit 1
+
+      - name: Start Telegram Bot API collector
+        run: |
+          python -m pip install --disable-pip-version-check --quiet 'psycopg[binary]>=3.2,<4'
+          if [ -z "$BOT_TOKEN" ]; then
+            echo "BOT_API_STATUS=missing-secret" >> "$GITHUB_ENV"
+            echo "TG_SEARCH_BOT_TOKEN secret is not configured; web preview will start without ingestion."
+            exit 0
+          fi
+          nohup python telegram_bot_api_collector.py > /tmp/tg-bot-api-collector.log 2>&1 &
+          echo $! > /tmp/tg-bot-api-collector.pid
+          sleep 5
+          if ! kill -0 "$(cat /tmp/tg-bot-api-collector.pid)" 2>/dev/null; then
+            cat /tmp/tg-bot-api-collector.log
+            exit 1
+          fi
+          echo "BOT_API_STATUS=running" >> "$GITHUB_ENV"
+          sed -n '1,40p' /tmp/tg-bot-api-collector.log || true
+
+      - name: Install Cloudflare tunnel client
+        run: |
+          curl -L --fail --retry 3 -o cloudflared https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64
+          chmod +x cloudflared
+
+      - name: Open temporary public preview
+        run: |
+          nohup ./cloudflared tunnel --url http://localhost:80 --no-autoupdate > /tmp/cloudflared.log 2>&1 &
+          for i in {1..60}; do
+            URL=$(grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' /tmp/cloudflared.log | head -n1 || true)
+            if [ -n "$URL" ]; then
+              echo "PUBLIC_URL=$URL" >> "$GITHUB_ENV"
+              echo "::notice title=Telegram Search Engine Bot API Preview::$URL"
+              exit 0
+            fi
+            sleep 2
+          done
+          cat /tmp/cloudflared.log
+          exit 1
+
+      - name: Publish preview status to branch
+        run: |
+          printf '%s\n' "$PUBLIC_URL" > tse-bot-api-preview-url.txt
+          printf '%s\n' "$BOT_API_STATUS" > tse-bot-api-status.txt
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add tse-bot-api-preview-url.txt tse-bot-api-status.txt
+          if ! git diff --cached --quiet; then
+            git commit -m 'Update Bot API preview status'
+            git push origin HEAD:bot-api-search
+          fi
+
+      - name: Keep preview online
+        run: |
+          echo "Preview URL: $PUBLIC_URL"
+          echo "Bot API collector: $BOT_API_STATUS"
+          while true; do
+            sleep 300
+            curl -fsS http://localhost/ >/dev/null || true
+            if [ -f /tmp/tg-bot-api-collector.pid ] && ! kill -0 "$(cat /tmp/tg-bot-api-collector.pid)" 2>/dev/null; then
+              echo "Collector stopped unexpectedly"
+              tail -n 100 /tmp/tg-bot-api-collector.log || true
+              exit 1
+            fi
+          done
