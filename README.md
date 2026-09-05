@@ -1,56 +1,89 @@
-# Telegram MTProto + Cloudflare external uploader
+# Telegram MTProto uploader — v3 corrected
 
-Bu loyiha katta videoni VPS diskiga yuklamasdan Telegram kanalga joylash uchun tayyorlangan.
+Katta videoni Telegram kanalga joylash uchun **external-first + streaming fallback** uploader.
+
+## Eng muhim tuzatish
+
+Oldingi v2 README `InputMediaDocumentExternal` uchun 20 MB limitni qat'iy deb yozgan edi. Bu isbotlanmagan.
+Telegram'ning **Bot API** hujjatida HTTP URL bilan yuborish uchun 20 MB limit bor, lekin MTProto
+`inputMediaDocumentExternal` rasmiy sahifasi faqat “Telegram serverlari URL'dan hujjatni yuklaydi” deydi va
+20 MB limit ko'rsatmaydi.
+
+Shuning uchun v3 default `auto` rejimida:
+
+1. avval `InputMediaDocumentExternal` sinanadi — runner video baytlarini tashimaydi;
+2. faqat Telegram external-fetch'ga xos xato (`WEBPAGE_CURL_FAILED`, `WEBPAGE_MEDIA_EMPTY`, va h.k.) qaytarsa
+   `stream` fallback ishlaydi;
+3. chat/peer/permission xatolari fallback bilan yashirilmaydi, darhol xato sifatida qaytadi.
+
+Agar external'ni faqat ma'lum hajmgacha sinashni xohlasangiz, GitHub variable `EXTERNAL_MAX_BYTES` ni >0 qiling.
+Default `0` — hajm bo'yicha cap yo'q.
 
 ## Oqim
 
-1. Direct video URL `fayllar1.ru` da turadi.
-2. Cloudflare Worker imzolangan `/proxy` URL orqali origin faylni byte-stream qiladi va `Range` so'rovlarini saqlab qoladi.
-3. Telethon MTProto klienti `InputMediaDocumentExternal` bilan shu Cloudflare URL'ni Telegram'ga beradi.
-4. Telegram serveri Worker URL'dan faylni o'zi yuklab oladi va kanalga joylaydi.
+### 1) External — birinchi tanlov
 
-Shuning uchun MTProto runner video baytlarini o'zidan o'tkazmaydi; u faqat Telegram RPC chaqirig'ini yuboradi.
+`fayllar1.ru -> Cloudflare signed proxy -> Telegram server -> kanal`
 
-## Oldingi xatolar uchun tuzatishlar
+GitHub runner faqat MTProto RPC yuboradi. Katta video baytlari runner orqali o'tmaydi.
 
-- `Invalid channel object`: `@channel_username` yoki `TELEGRAM_CHANNEL_ACCESS_HASH` bilan robust peer resolve qo'shildi.
-- `Failure while fetching the webpage with cURL`: original `fayllar1.ru` URL Telegramga bevosita berilmaydi; Cloudflare signed streaming proxy URL ishlatiladi.
-- Katta fayl RAM muammosi: Worker `Response(upstream.body)` orqali streaming qiladi, to'liq faylni buffer qilmaydi.
-- Range: `Range`, `If-Range`, `Content-Range`, `Accept-Ranges`, `Content-Length` kabi headerlar uzatiladi.
-- Open proxy xavfi: faqat `fayllar1.ru` / subdomainlari allowlistda; URL HMAC-SHA256 bilan imzolanadi va muddati tugaydi.
-- Telegram fetch retry: har urinishda yangi nonce bilan yangi proxy URL yaratiladi.
-- Uploaddan oldin HEAD va `bytes=0-1023` probe ishlaydi.
+### 2) Stream fallback
+
+`fayllar1.ru -> GitHub runner -> MTProto upload.saveBigFilePart -> Telegram`
+
+Diskka to'liq video yozilmaydi; baytlar chunk-chunk uzatiladi. Direct origin GitHub runner'ni bloklasa,
+keyingi retry `Cloudflare proxy -> runner -> Telegram` ga o'tadi.
+
+Telegram'ning joriy client config hujjatida upload limitlari 4000/8000 ta 512 KiB part orqali belgilanadi
+(non-Premium/Premium). Bu limitlar server konfiguratsiyasi bo'lgani uchun kodda “abadiy 2/4 GB” deb hardcode qilinmagan.
+
+## v2 dan topilgan va v3 da tuzatilgan xatolar
+
+1. **Noto'g'ri 20 MB xulosasi** — Bot API limiti MTProto external media uchun hujjatlashtirilgan limit emas.
+2. **Probe butun videoni yuklab yuborishi mumkin edi** — origin Range'ni e'tiborsiz qoldirib HTTP 200 qaytarsa,
+   `await resp.content.read()` qolgan multi-GB body'ni drain qilardi. Endi 1024 baytdan keyin response yopiladi.
+3. **`EXTERNAL_MAX_BYTES` bo'sh GitHub variable bo'lsa crash** — `int("")` muammosi tuzatildi; bo'sh qiymat defaultga tushadi.
+4. **Auto fallback juda keng edi** — har qanday `RPCError` stream'ga o'tardi. Endi faqat external-fetch xatolari fallback qiladi.
+5. **Direct stream hotlink headerlarsiz edi** — User-Agent va Referer qo'shildi; direct stream bloklansa proxy-stream fallback bor.
+6. **Probe va real stream hajmi farqi** — upload boshlanishida Content-Length/Content-Range mosligi tekshiriladi.
+7. **Temp thumbnail qolib ketardi** — yuborilgach o'chiriladi.
+8. **Repo default branch `master`, workflow esa faqat `main` edi** — deploy endi `master` va `main` uchun ishlaydi.
+9. **Proxy URL `.mp4` bilan tugamasdi** — Telegram tashqi hujjatni `proxy` nomi bilan ko'rishi mumkin edi. Endi signed URL
+   `/proxy/<original-filename>.mp4?...` ko'rinishida va Worker `Content-Disposition` filename ham beradi.
+10. v2 dagi yaxshi tuzatishlar saqlandi: opaque-token HMAC, redirect allowlist, SSRF himoyasi, Range/HEAD emulyatsiyasi,
+    Worker/cross-language testlar.
 
 ## Cloudflare secrets
 
-Worker uchun:
-
 - `PROXY_SECRET` — uzun tasodifiy secret.
-- `ADMIN_KEY` — faqat `/sign` diagnostik endpointi uchun.
+- `ADMIN_KEY` — ixtiyoriy, `/sign` diagnostik endpointi uchun.
 
-GitHub Actions uchun:
+## GitHub Actions secrets
 
 - `TELEGRAM_API_ID`
 - `TELEGRAM_API_HASH`
 - `TELETHON_SESSION`
-- `TELEGRAM_CHANNEL` — eng yaxshi variant `@channel_username`.
-- `TELEGRAM_CHANNEL_ACCESS_HASH` — faqat numeric kanal ID ishlatilsa kerak bo'lishi mumkin.
-- `CF_PROXY_BASE` — masalan `https://telegram-mtproto-stream-proxy.<subdomain>.workers.dev`.
-- `CF_PROXY_SECRET` — Worker'dagi `PROXY_SECRET` bilan bir xil.
-
-Cloudflare deploy workflow uchun qo'shimcha:
-
+- `TELEGRAM_CHANNEL` — imkon bo'lsa `@username`
+- `TELEGRAM_CHANNEL_ACCESS_HASH` — numeric kanal ID ishlatilsa
+- `CF_PROXY_BASE`
+- `CF_PROXY_SECRET`
 - `CLOUDFLARE_API_TOKEN`
 - `CLOUDFLARE_ACCOUNT_ID`
+- `CF_ADMIN_KEY` — ixtiyoriy
 
-## Session yaratish
+## GitHub Actions variables
 
-Bir martalik interaktiv login uchun `mtproto/make_session.py` ishlatiladi. Olingan `TELETHON_SESSION` GitHub secret sifatida saqlanadi. Sessionni public repo ichiga yozmang.
+- `EXTERNAL_MAX_BYTES` — default `0` (external-first, cap yo'q).
+- `STREAM_VIA_PROXY=true` — stream boshidan Cloudflare orqali o'tsin; default direct origin.
 
-## Test
+## Test tartibi
 
-Avval GitHub Actions → `MTProto external upload` → `dry_run=true` bilan kichik MP4 URL yuboring. Proxy HEAD/Range testi muvaffaqiyatli bo'lsa, `dry_run=false` bilan real kanal testini ishlating.
+1. `MTProto upload` workflow: `mode=auto`, `dry_run=true`.
+2. Kichik, tarqatish huquqi sizda bo'lgan MP4 bilan `dry_run=false`.
+3. Keyin katta fayl bilan `mode=auto` — external ishlasa runner traffic ~0; external fetch rad etilsa stream fallback.
+4. Mass uploadni faqat bitta fayl va keyin kichik batch muvaffaqiyatli o'tgandan keyin yoqing.
 
-## Muhim
+## Xavfsizlik
 
-Faqat tarqatish huquqi sizda bo'lgan media fayllarni kanalga joylang.
+`TELETHON_SESSION` Telegram akkauntga kuchli kirish huquqi beradi. Uni repo, log yoki chatga joylamang.
+Faqat tarqatish huquqi sizda bo'lgan media fayllarni yuboring.
