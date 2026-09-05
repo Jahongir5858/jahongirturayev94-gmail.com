@@ -1,0 +1,45 @@
+name: MTProto external upload
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_url:
+        description: Direct video URL
+        required: true
+        type: string
+      caption:
+        description: Telegram caption
+        required: false
+        type: string
+      dry_run:
+        description: Only test Cloudflare proxy
+        required: false
+        default: false
+        type: boolean
+
+jobs:
+  upload:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install uploader dependencies
+        run: pip install -r mtproto/requirements.txt
+      - name: Run MTProto uploader
+        env:
+          SOURCE_URL: ${{ inputs.source_url }}
+          CAPTION: ${{ inputs.caption }}
+          TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
+          TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
+          TELETHON_SESSION: ${{ secrets.TELETHON_SESSION }}
+          TELEGRAM_CHANNEL: ${{ secrets.TELEGRAM_CHANNEL }}
+          TELEGRAM_CHANNEL_ACCESS_HASH: ${{ secrets.TELEGRAM_CHANNEL_ACCESS_HASH }}
+          CF_PROXY_BASE: ${{ secrets.CF_PROXY_BASE }}
+          CF_PROXY_SECRET: ${{ secrets.CF_PROXY_SECRET }}
+        run: |
+          extra=""
+          if [ "${{ inputs.dry_run }}" = "true" ]; then extra="--dry-run"; fi
+          python mtproto/uploader.py --url "$SOURCE_URL" --caption "$CAPTION" $extra
