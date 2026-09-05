@@ -1,0 +1,29 @@
+name: Tests
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install Python dependencies
+        run: pip install -r mtproto/requirements.txt -r tests/requirements.txt
+      - name: Python tests
+        run: python -m pytest -q
+      - name: Worker syntax check
+        run: node --check cloudflare-worker/src/index.js
+      - name: Worker tests
+        run: node tests/test_worker.mjs
+      - name: Cross-language signature check
+        run: node tests/test_cross_language.mjs
