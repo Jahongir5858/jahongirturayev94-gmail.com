@@ -1,1 +1,36 @@
+name: Deploy Cloudflare Worker
 
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'cloudflare-worker/**'
+      - '.github/workflows/deploy-cloudflare.yml'
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: cloudflare-worker
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install --no-audit --no-fund
+      - run: npm run check
+      - name: Deploy
+        run: npx wrangler deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      - name: Configure Worker secrets
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          PROXY_SECRET_VALUE: ${{ secrets.CF_PROXY_SECRET }}
+          ADMIN_KEY_VALUE: ${{ secrets.CF_ADMIN_KEY }}
+        run: |
+          printf '%s' "$PROXY_SECRET_VALUE" | npx wrangler secret put PROXY_SECRET
+          printf '%s' "$ADMIN_KEY_VALUE" | npx wrangler secret put ADMIN_KEY
