@@ -3,13 +3,19 @@ name: Deploy Cloudflare Worker
 on:
   workflow_dispatch:
   push:
+    branches: [master, main]
     paths:
       - 'cloudflare-worker/**'
       - '.github/workflows/deploy-cloudflare.yml'
 
+concurrency:
+  group: deploy-cloudflare
+  cancel-in-progress: true
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: cloudflare-worker
@@ -18,13 +24,23 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - run: npm install --no-audit --no-fund
-      - run: npm run check
+
+      - name: Install
+        run: npm install --no-audit --no-fund
+
+      - name: Check
+        run: npm run check
+
+      - name: Worker tests
+        working-directory: .
+        run: node tests/test_worker.mjs
+
       - name: Deploy
         run: npx wrangler deploy
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
       - name: Configure Worker secrets
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -32,5 +48,12 @@ jobs:
           PROXY_SECRET_VALUE: ${{ secrets.CF_PROXY_SECRET }}
           ADMIN_KEY_VALUE: ${{ secrets.CF_ADMIN_KEY }}
         run: |
+          set -euo pipefail
+          if [ -z "$PROXY_SECRET_VALUE" ]; then
+            echo "CF_PROXY_SECRET secret is empty - proxy would reject every request" >&2
+            exit 1
+          fi
           printf '%s' "$PROXY_SECRET_VALUE" | npx wrangler secret put PROXY_SECRET
-          printf '%s' "$ADMIN_KEY_VALUE" | npx wrangler secret put ADMIN_KEY
+          if [ -n "$ADMIN_KEY_VALUE" ]; then
+            printf '%s' "$ADMIN_KEY_VALUE" | npx wrangler secret put ADMIN_KEY
+          fi
