@@ -1,0 +1,77 @@
+name: Telegram Search Engine Preview
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/tse-preview.yml'
+
+jobs:
+  preview:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - name: Clone Telegram Search Engine
+        run: git clone --depth 1 https://github.com/Brooksolomon/Telegram-Search-Engine.git tse
+
+      - name: Configure preview environment
+        working-directory: tse
+        run: |
+          cat > .env.prod <<'EOF'
+          DOMAIN=localhost
+          POSTGRES_USER=tgsearch
+          POSTGRES_PASSWORD=preview-postgres-9f3c7b1a
+          POSTGRES_DB=tgsearch
+          MEILI_MASTER_KEY=preview-meili-5d8a2c4e
+          CORS_ORIGINS=http://localhost
+          NEXT_PUBLIC_REPO_URL=https://github.com/Brooksolomon/Telegram-Search-Engine
+          EOF
+
+      - name: Build and start stack
+        working-directory: tse
+        run: |
+          docker compose -f docker-compose.yml -f docker-compose.ip.yml --env-file .env.prod up -d --build
+          docker compose -f docker-compose.yml -f docker-compose.ip.yml --env-file .env.prod ps
+
+      - name: Wait for web app
+        run: |
+          for i in {1..60}; do
+            if curl -fsS http://localhost/ >/dev/null 2>&1; then
+              echo "Web app is responding"
+              exit 0
+            fi
+            sleep 5
+          done
+          cd tse
+          docker compose -f docker-compose.yml -f docker-compose.ip.yml --env-file .env.prod logs --tail=200
+          exit 1
+
+      - name: Install Cloudflare tunnel client
+        run: |
+          curl -L --fail --retry 3 -o cloudflared https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64
+          chmod +x cloudflared
+
+      - name: Open temporary public preview
+        run: |
+          nohup ./cloudflared tunnel --url http://localhost:80 --no-autoupdate > /tmp/cloudflared.log 2>&1 &
+          for i in {1..60}; do
+            URL=$(grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' /tmp/cloudflared.log | head -n1 || true)
+            if [ -n "$URL" ]; then
+              echo "PUBLIC_URL=$URL" >> "$GITHUB_ENV"
+              echo "PUBLIC_URL=$URL"
+              echo "::notice title=Telegram Search Engine Preview::$URL"
+              exit 0
+            fi
+            sleep 2
+          done
+          cat /tmp/cloudflared.log
+          exit 1
+
+      - name: Keep preview online
+        run: |
+          echo "Preview URL: $PUBLIC_URL"
+          echo "This temporary preview remains online while this workflow job is running."
+          while true; do
+            sleep 300
+            curl -fsS http://localhost/ >/dev/null || true
+          done
