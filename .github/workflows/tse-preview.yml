@@ -6,6 +6,13 @@ on:
     paths:
       - '.github/workflows/tse-preview.yml'
 
+permissions:
+  contents: write
+
+concurrency:
+  group: tse-preview
+  cancel-in-progress: true
+
 jobs:
   preview:
     runs-on: ubuntu-latest
@@ -66,6 +73,17 @@ jobs:
           done
           cat /tmp/cloudflared.log
           exit 1
+
+      - name: Publish preview URL to repository
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          CONTENT=$(printf '%s\n' "$PUBLIC_URL" | base64 -w0)
+          API="https://api.github.com/repos/${GITHUB_REPOSITORY}/contents/tse-preview-url.txt"
+          SHA=$(curl -fsS -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" "$API?ref=${GITHUB_REF_NAME}" 2>/dev/null | jq -r '.sha // empty' || true)
+          BODY=$(jq -n --arg message "Update Telegram Search Engine preview URL" --arg content "$CONTENT" --arg branch "$GITHUB_REF_NAME" --arg sha "$SHA" '{message:$message, content:$content, branch:$branch} + (if $sha != "" then {sha:$sha} else {} end)')
+          curl -fsS -X PUT -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28" "$API" -d "$BODY" >/dev/null
+          echo "Published $PUBLIC_URL"
 
       - name: Keep preview online
         run: |
