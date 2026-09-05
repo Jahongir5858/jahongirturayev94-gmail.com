@@ -1,4 +1,4 @@
-name: MTProto external upload
+name: MTProto upload
 
 on:
   workflow_dispatch:
@@ -11,27 +11,56 @@ on:
         description: Telegram caption
         required: false
         type: string
+      mode:
+        description: >-
+          auto = external-first then stream fallback; external = Telegram fetches the URL;
+          stream = runner pipes bytes to MTProto (works for multi-GB files)
+        required: false
+        default: auto
+        type: choice
+        options: [auto, external, stream]
       dry_run:
-        description: Only test Cloudflare proxy
+        description: Only probe the proxy and report the chosen mode
         required: false
         default: false
         type: boolean
 
+concurrency:
+  group: mtproto-upload
+  cancel-in-progress: false
+
 jobs:
   upload:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 300
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Install uploader dependencies
+          cache: pip
+          cache-dependency-path: mtproto/requirements.txt
+
+      - name: Install dependencies
         run: pip install -r mtproto/requirements.txt
-      - name: Run MTProto uploader
+
+      - name: Install ffmpeg
+        if: inputs.mode != 'external'
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
+
+      - name: Free disk space
+        if: inputs.mode != 'external'
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android || true
+          df -h /
+
+      - name: Upload
         env:
           SOURCE_URL: ${{ inputs.source_url }}
           CAPTION: ${{ inputs.caption }}
+          MODE: ${{ inputs.mode }}
+          DRY_RUN: ${{ inputs.dry_run }}
           TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
           TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
           TELETHON_SESSION: ${{ secrets.TELETHON_SESSION }}
@@ -39,7 +68,10 @@ jobs:
           TELEGRAM_CHANNEL_ACCESS_HASH: ${{ secrets.TELEGRAM_CHANNEL_ACCESS_HASH }}
           CF_PROXY_BASE: ${{ secrets.CF_PROXY_BASE }}
           CF_PROXY_SECRET: ${{ secrets.CF_PROXY_SECRET }}
+          EXTERNAL_MAX_BYTES: ${{ vars.EXTERNAL_MAX_BYTES }}
+          STREAM_VIA_PROXY: ${{ vars.STREAM_VIA_PROXY }}
         run: |
-          extra=""
-          if [ "${{ inputs.dry_run }}" = "true" ]; then extra="--dry-run"; fi
-          python mtproto/uploader.py --url "$SOURCE_URL" --caption "$CAPTION" $extra
+          set -euo pipefail
+          args=(--url "$SOURCE_URL" --caption "$CAPTION" --mode "$MODE")
+          if [ "$DRY_RUN" = "true" ]; then args+=(--dry-run); fi
+          python mtproto/uploader.py "${args[@]}"
