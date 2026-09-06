@@ -1,0 +1,145 @@
+name: Uzbekistan Map Dashboard Live Preview
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - uzbekistan-map-dashboard
+    paths:
+      - 'uzbekistan-dashboard/**'
+      - '.github/workflows/uzbekistan-dashboard-preview.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: uzbekistan-dashboard-live-v1
+  cancel-in-progress: true
+
+jobs:
+  preview:
+    runs-on: ubuntu-latest
+    timeout-minutes: 340
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate dashboard source
+        run: |
+          set -euo pipefail
+          node --check uzbekistan-dashboard/app.js
+          node - <<'NODE'
+          const fs=require('fs'),vm=require('vm');
+          const ctx={window:{}};
+          vm.createContext(ctx);
+          for(const f of ['data-base.js','data-2027.js','data-208.js']) vm.runInContext(fs.readFileSync('uzbekistan-dashboard/'+f,'utf8'),ctx);
+          const d=ctx.window.DASH_RAW;
+          if (!d || d.c.length!==20 || d.p.length!==102 || d.d.length!==208) {
+            throw new Error('Dashboard dataset counts are invalid');
+          }
+          console.log('Dataset verified:', d.m);
+          NODE
+
+      - name: Start static server
+        run: |
+          nohup python3 -m http.server 4173 --directory uzbekistan-dashboard >/tmp/dashboard-http.log 2>&1 &
+          for i in {1..30}; do
+            if curl -fsS http://127.0.0.1:4173/ >/dev/null; then exit 0; fi
+            sleep 1
+          done
+          cat /tmp/dashboard-http.log
+          exit 1
+
+      - name: Install browser smoke-test helper
+        run: |
+          mkdir -p /tmp/dashboard-smoke
+          cd /tmp/dashboard-smoke
+          npm init -y >/dev/null 2>&1
+          npm install --no-save puppeteer-core@24.16.0 >/dev/null 2>&1
+          cat > smoke.cjs <<'NODE'
+          const puppeteer = require('puppeteer-core');
+          const url = process.argv[2];
+          const chrome = process.env.CHROME_BIN;
+          (async()=>{
+            const browser=await puppeteer.launch({headless:true,executablePath:chrome,args:['--no-sandbox','--disable-dev-shm-usage','--disable-gpu']});
+            const page=await browser.newPage();
+            await page.setViewport({width:1440,height:900,deviceScaleFactor:1});
+            const errors=[];
+            page.on('pageerror',e=>errors.push(String(e)));
+            page.on('console',m=>{if(m.type()==='error') errors.push('console: '+m.text())});
+            await page.goto(url,{waitUntil:'domcontentloaded',timeout:45000});
+            await page.waitForSelector('.object-card',{timeout:15000});
+            await page.waitForSelector('.maplibregl-canvas',{timeout:20000});
+            await new Promise(r=>setTimeout(r,4500));
+            const state=await page.evaluate(()=>({
+              cards:document.querySelectorAll('.object-card').length,
+              canvas:document.querySelectorAll('.maplibregl-canvas').length,
+              kpi2026:document.querySelector('#kpi2026')?.textContent,
+              kpi2027:document.querySelector('#kpi2027')?.textContent,
+              ready:document.body.dataset.dashboardReady||''
+            }));
+            console.log(JSON.stringify(state));
+            if(state.cards!==122 || !state.canvas || state.kpi2026!=='20' || state.kpi2027!=='102') throw new Error('Rendered dashboard state is invalid');
+            if(errors.some(x=>/SyntaxError|ReferenceError|TypeError/.test(x))) throw new Error('Browser runtime errors: '+errors.join(' | '));
+            await page.screenshot({path:process.argv[3]||'/tmp/dashboard.png'});
+            await browser.close();
+          })().catch(e=>{console.error(e);process.exit(1)});
+          NODE
+          CHROME_BIN="$(command -v google-chrome || command -v chromium || command -v chromium-browser || true)"
+          test -n "$CHROME_BIN"
+          echo "CHROME_BIN=$CHROME_BIN" >> "$GITHUB_ENV"
+
+      - name: Local browser runtime test
+        run: |
+          node /tmp/dashboard-smoke/smoke.cjs http://127.0.0.1:4173/ /tmp/dashboard-local.png
+
+      - name: Upload verified screenshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: uzbekistan-dashboard-screenshot
+          path: /tmp/dashboard-local.png
+          if-no-files-found: error
+
+      - name: Install Cloudflare tunnel client
+        run: |
+          curl -L --fail --retry 3 -o cloudflared https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64
+          chmod +x cloudflared
+
+      - name: Open public Quick Tunnel
+        run: |
+          nohup ./cloudflared tunnel --url http://127.0.0.1:4173 --no-autoupdate >/tmp/cloudflared-dashboard.log 2>&1 &
+          for i in {1..90}; do
+            URL=$(grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' /tmp/cloudflared-dashboard.log | head -n1 || true)
+            if [ -n "$URL" ]; then
+              echo "PUBLIC_URL=$URL" >> "$GITHUB_ENV"
+              echo "::notice title=Uzbekistan Dashboard::$URL"
+              exit 0
+            fi
+            sleep 2
+          done
+          cat /tmp/cloudflared-dashboard.log
+          exit 1
+
+      - name: Public browser runtime test
+        run: |
+          node /tmp/dashboard-smoke/smoke.cjs "$PUBLIC_URL/" /tmp/dashboard-public.png
+
+      - name: Publish current preview URL to branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          CONTENT=$(printf '%s\n' "$PUBLIC_URL" | base64 -w0)
+          API="https://api.github.com/repos/${GITHUB_REPOSITORY}/contents/uzbekistan-dashboard-preview-url.txt"
+          SHA=$(curl -fsS -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" "$API?ref=${GITHUB_REF_NAME}" 2>/dev/null | jq -r '.sha // empty' || true)
+          BODY=$(jq -n --arg message "Update Uzbekistan dashboard preview URL" --arg content "$CONTENT" --arg branch "$GITHUB_REF_NAME" --arg sha "$SHA" '{message:$message,content:$content,branch:$branch} + (if $sha != "" then {sha:$sha} else {} end)')
+          curl -fsS -X PUT -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28" "$API" -d "$BODY" >/dev/null
+          echo "Published: $PUBLIC_URL"
+
+      - name: Keep preview online
+        run: |
+          echo "Dashboard preview: $PUBLIC_URL"
+          while true; do
+            sleep 240
+            curl -fsS http://127.0.0.1:4173/ >/dev/null || exit 1
+          done
