@@ -2,55 +2,110 @@
 <html lang="uz">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <meta name="theme-color" content="#071522" />
-  <title>Hududiy ijtimoiy xizmatlar markazlari — xarita dashboard</title>
-  <link rel="preconnect" href="https://a.basemaps.cartocdn.com" />
-  <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5.24.0/dist/maplibre-gl.css" />
-  <link rel="stylesheet" href="./styles.css" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <meta name="theme-color" content="#071a26" />
+  <title>Hududiy ijtimoiy xizmatlar markazlari — Google Maps monitoring</title>
+  <link rel="preconnect" href="https://maps.googleapis.com" />
+  <link rel="preconnect" href="https://maps.gstatic.com" />
+  <link rel="dns-prefetch" href="https://mfc-telegram-worker.jahongirturayev94.workers.dev" />
+  <style>html,body,#app,#map{margin:0;width:100%;height:100%;overflow:hidden}body{background:#071a26;color:#eef7fa;font-family:Inter,system-ui,sans-serif}.map-loading{position:absolute;inset:0;display:grid;place-items:center;text-align:center;background:#eaf0f3;color:#102a36}.map-loading small{display:block;margin-top:6px}</style>
 </head>
 <body>
-  <div id="app">
-    <div id="map" aria-label="O‘zbekiston interaktiv xaritasi"></div>
-    <header class="topbar glass">
-      <div class="brand" aria-label="Hududiy ijtimoiy xizmatlar markazlari">
-        <div class="brand-icon" aria-hidden="true"><svg viewBox="0 0 40 40"><path d="M7.5 19.7 20 8l12.5 11.7v12.8H7.5Z"/><circle cx="20" cy="19" r="3.2"/><path d="M14.2 28.5c1.4-4 3.3-5.9 5.8-5.9s4.4 1.9 5.8 5.9"/></svg></div>
-        <div class="brand-text"><span>HUDUDIY IJTIMOIY XIZMATLAR</span><strong>XARITA DASHBOARD</strong></div>
-      </div>
-      <nav class="top-actions" aria-label="Dashboard amallari">
-        <button id="analysisBtn" class="toolbar-btn" type="button" title="Tahlil paneli"><svg viewBox="0 0 24 24"><path d="M4 19V9m6 10V5m6 14v-7m4 7H2"/></svg><span>Tahlil</span></button>
-        <button id="pitchBtn" class="toolbar-btn" type="button" title="3D ko‘rinish"><svg viewBox="0 0 24 24"><path d="m12 3 9 5-9 5-9-5 9-5Z"/><path d="m3 12 9 5 9-5M3 16l9 5 9-5"/></svg><span>3D</span></button>
-        <button id="fitBtn" class="icon-btn" type="button" title="O‘zbekistonni to‘liq ko‘rsatish"><svg viewBox="0 0 24 24"><path d="M8 3H3v5M16 3h5v5M8 21H3v-5M16 21h5v-5"/></svg></button>
-      </nav>
-    </header>
-    <section class="kpi-strip" aria-label="Asosiy ko‘rsatkichlar">
-      <button class="kpi-card glass" data-kpi-year="2026" type="button"><span class="kpi-dot green"></span><div><small>2026 MARKAZLARI</small><strong id="kpi2026">20</strong></div></button>
-      <button class="kpi-card glass" data-kpi-year="2027" type="button"><span class="kpi-dot red"></span><div><small>2027 TAKLIFLARI</small><strong id="kpi2027">102</strong></div></button>
-      <button class="kpi-card glass" data-kpi-selected="1" type="button"><span class="kpi-dot blue"></span><div><small>2027 TANLANGAN HUDUD</small><strong id="kpiSelected">29</strong></div></button>
-      <button class="kpi-card glass" data-open-analysis="1" type="button"><span class="kpi-dot neutral"></span><div><small>TUMAN / SHAHAR</small><strong id="kpiDistricts">208</strong></div></button>
-      <div class="kpi-card glass population-card"><span class="kpi-dot teal"></span><div><small>AHOLI · 01.01.2026</small><strong id="kpiPopulation">38,2 mln</strong></div></div>
-    </section>
-    <aside id="browserPanel" class="browser-panel glass" aria-label="Obyektlar ro‘yxati">
-      <div class="panel-header"><div><span class="eyebrow">MONITORING</span><h1>Markazlar va takliflar</h1></div><button id="mobileCloseBrowser" class="panel-close mobile-only" type="button" aria-label="Panelni yopish">×</button></div>
-      <div class="year-tabs" role="tablist" aria-label="Yil filtri"><button class="year-tab active" data-year="all" type="button">Barchasi <b>122</b></button><button class="year-tab" data-year="2026" type="button">2026 <b>20</b></button><button class="year-tab" data-year="2027" type="button">2027 <b>102</b></button></div>
-      <label class="search-field"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input id="searchInput" type="search" placeholder="Viloyat, tuman yoki obyekt..." autocomplete="off" /></label>
-      <div class="filter-grid"><label class="select-wrap"><span>Hudud</span><select id="regionSelect"><option value="">Barcha hududlar</option></select></label><label class="select-wrap"><span>Obyekt turi</span><select id="typeSelect"><option value="">Barchasi</option><option value="Bino">Bino</option><option value="Yer">Yer</option></select></label></div>
-      <div class="filter-row"><label class="check-pill"><input id="selectedOnly" type="checkbox"/><span>Faqat tanlangan 2027</span></label><button id="clearFilters" class="text-btn" type="button">Tozalash</button></div>
-      <div class="list-meta"><span id="listSummary">122 ta obyekt</span><span id="listRegionSummary">14 hudud</span></div><div id="objectList" class="object-list" role="list"></div>
-    </aside>
-    <div class="legend glass" aria-label="Xarita legendasi"><div><i class="legend-dot green"></i><span>2026 markaz</span></div><div><i class="legend-dot red"></i><span>2027 taklif</span></div><div><i class="legend-dot blue"></i><span>2027 tanlangan</span></div><div><i class="legend-dot purple"></i><span>Inson markazi bilan bog‘liq</span></div></div>
-    <div class="map-controls glass"><button id="zoomIn" type="button" title="Yaqinlashtirish">+</button><button id="zoomOut" type="button" title="Uzoqlashtirish">−</button><button id="northBtn" type="button" title="Shimolga qaytarish">N</button></div>
-    <button id="mobileBrowserBtn" class="mobile-fab mobile-only" type="button"><svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></svg><span>Obyektlar</span></button>
-    <aside id="detailDrawer" class="detail-drawer glass" aria-live="polite"><div id="detailContent"></div></aside>
-    <aside id="analysisDrawer" class="analysis-drawer glass" aria-label="Tahlil paneli"><div class="drawer-head"><div><span class="eyebrow">208 HUDUD TAHLILI</span><h2>Demografik va takliflar kesimi</h2></div><button id="analysisClose" class="panel-close" type="button" aria-label="Tahlil panelini yopish">×</button></div><div id="analysisContent" class="analysis-content"></div></aside>
-    <div id="toast" class="toast" role="status" aria-live="polite"></div><div class="source-note glass">Manbalar: 2026 markazlar ro‘yxati · 2027 takliflar xaritasi · 208 tuman/shahar kontingent jadvali</div>
+<div id="app">
+  <div id="map" aria-label="O‘zbekiston Google xaritasi">
+    <div class="map-loading"><span class="loader-ring"></span><b>Google xaritasi tayyorlanmoqda</b><small>Dashboard ma’lumotlari avval yuklanadi</small></div>
   </div>
-  <script src="https://unpkg.com/maplibre-gl@5.24.0/dist/maplibre-gl.js"></script>
-  <script src="./map-style-fallback.js"></script>
-  <script src="./data-base.js"></script>
-  <script src="./data-2027-a.js"></script><script src="./data-2027-b.js"></script><script src="./data-2027-c.js"></script><script src="./data-2027-d.js"></script>
-  <script src="./data-208-a.js"></script><script src="./data-208-b.js"></script><script src="./data-208-c.js"></script><script src="./data-208-d.js"></script>
-  <script src="./data-normalize.js"></script>
-  <script src="./app.js"></script>
+
+  <header class="app-header surface">
+    <button id="brandBtn" class="brand" type="button" title="O‘zbekiston umumiy ko‘rinishi">
+      <span class="brand-mark">IH</span>
+      <span><small>HUDUDIY IJTIMOIY XIZMATLAR</small><b>Monitoring xaritasi</b></span>
+    </button>
+    <div class="place-search-wrap">
+      <span class="search-icon">⌕</span>
+      <input id="placeSearch" type="search" placeholder="Google Places: manzil, tashkilot yoki joy qidiring…" autocomplete="off" />
+      <span id="mapsStatus" class="maps-status"><i></i> Google Maps</span>
+    </div>
+    <div class="header-actions">
+      <button id="locateBtn" class="action-btn" type="button"><span>◎</span><em>Joylashuv</em></button>
+      <button id="analysisBtn" class="action-btn" type="button"><span>▥</span><em>Tahlil</em></button>
+      <button id="toggleExplorer" class="action-btn mobile-only" type="button"><span>☷</span><em>Obyektlar</em></button>
+    </div>
+  </header>
+
+  <section class="kpi-dock surface" aria-label="Asosiy ko‘rsatkichlar">
+    <button class="kpi active" data-year="all" type="button"><span class="kpi-icon all">Σ</span><span><small>JAMI OBYEKT</small><b id="kpiTotal">122</b></span></button>
+    <button class="kpi" data-year="2026" type="button"><span class="kpi-icon green">●</span><span><small>2026 MARKAZ</small><b id="kpi2026">20</b></span></button>
+    <button class="kpi" data-year="2027" type="button"><span class="kpi-icon red">●</span><span><small>2027 TAKLIF</small><b id="kpi2027">102</b></span></button>
+    <button class="kpi" data-selected="1" type="button"><span class="kpi-icon blue">◆</span><span><small>TANLANGAN 2027</small><b id="kpiSelected">29</b></span></button>
+    <button class="kpi" data-analysis="1" type="button"><span class="kpi-icon neutral">208</span><span><small>TUMAN / SHAHAR</small><b id="kpiDistricts">208</b></span></button>
+    <div class="kpi population"><span class="kpi-icon teal">◉</span><span><small>AHOLI · 01.01.2026</small><b id="kpiPopulation">38,2 mln</b></span></div>
+  </section>
+
+  <aside id="explorer" class="explorer surface">
+    <div class="explorer-head">
+      <div><span class="eyebrow">MA’LUMOTLAR KATALOGI</span><h1>Markazlar va takliflar</h1></div>
+      <button id="closeExplorer" class="close-btn mobile-only" type="button">×</button>
+    </div>
+    <div class="year-tabs">
+      <button class="year-tab active" data-year="all" type="button">Barchasi <b>122</b></button>
+      <button class="year-tab" data-year="2026" type="button">2026 <b>20</b></button>
+      <button class="year-tab" data-year="2027" type="button">2027 <b>102</b></button>
+    </div>
+    <label class="object-search"><span>⌕</span><input id="objectSearch" type="search" placeholder="Viloyat, tuman, obyekt…" autocomplete="off" /></label>
+    <div class="filter-row two">
+      <label><small>HUDUD</small><select id="regionSelect"><option value="">Barcha hududlar</option></select></label>
+      <label><small>OBYEKT</small><select id="typeSelect"><option value="">Barchasi</option><option value="Bino">Bino</option><option value="Yer">Yer</option></select></label>
+    </div>
+    <div class="quick-filters">
+      <label class="chip-check"><input id="selectedOnly" type="checkbox" /><span>Tanlangan 2027</span></label>
+      <button id="clearFilters" class="link-btn" type="button">Filtrlarni tozalash</button>
+    </div>
+    <div class="list-summary"><span id="listSummary">122 ta obyekt</span><span id="regionSummary">14 hudud</span></div>
+    <div id="objectList" class="object-list" role="list"></div>
+  </aside>
+
+  <nav class="map-toolbar surface" aria-label="Google xarita vositalari">
+    <button id="mapTypeBtn" type="button" title="Xarita turi"><span>▱</span><small>Xarita</small></button>
+    <button id="trafficBtn" type="button" title="Tirbandlik"><span>≋</span><small>Trafik</small></button>
+    <button id="boundaryBtn" type="button" title="Viloyat va tuman chegaralari"><span>◇</span><small>Chegara</small></button>
+    <button id="tiltBtn" type="button" title="3D ko‘rinish"><span>◩</span><small>3D</small></button>
+    <button id="fitBtn" type="button" title="O‘zbekistonni to‘liq ko‘rsatish"><span>⌂</span><small>Umumiy</small></button>
+  </nav>
+
+  <div id="mapTypeMenu" class="map-type-menu surface" hidden>
+    <button data-maptype="roadmap" class="active" type="button">Standart</button>
+    <button data-maptype="satellite" type="button">Sun’iy yo‘ldosh</button>
+    <button data-maptype="hybrid" type="button">Gibrid</button>
+    <button data-maptype="terrain" type="button">Relyef</button>
+  </div>
+
+  <div class="legend surface">
+    <span><i class="dot green"></i>2026</span><span><i class="dot red"></i>2027</span><span><i class="dot blue"></i>Tanlangan</span><span><i class="dot purple"></i>Inson markazi</span>
+  </div>
+
+  <aside id="detailDrawer" class="detail-drawer surface" aria-live="polite"><div id="detailContent"></div></aside>
+
+  <aside id="analysisDrawer" class="analysis-drawer surface" aria-label="208 hudud tahlili">
+    <div class="drawer-head"><div><span class="eyebrow">208 HUDUD TAHLILI</span><h2>Demografik va takliflar kesimi</h2></div><button id="analysisClose" class="close-btn" type="button">×</button></div>
+    <div id="analysisContent" class="analysis-content"></div>
+  </aside>
+
+  <section id="streetViewSheet" class="street-sheet surface" hidden>
+    <div class="street-head"><div><span class="eyebrow">GOOGLE STREET VIEW</span><b id="streetTitle">Ko‘cha ko‘rinishi</b></div><button id="streetClose" class="close-btn" type="button">×</button></div>
+    <div id="streetView"></div>
+  </section>
+
+  <div id="routeBar" class="route-bar surface" hidden><div><small>YO‘NALISH</small><b id="routeSummary">Hisoblanmoqda…</b></div><button id="routeClear" type="button">Tozalash</button></div>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+</div>
+
+<script src="./google-config.js"></script>
+<script src="./data-base.js"></script>
+<script src="./data-2027-a.js"></script><script src="./data-2027-b.js"></script><script src="./data-2027-c.js"></script><script src="./data-2027-d.js"></script>
+<script src="./data-208-a.js"></script><script src="./data-208-b.js"></script><script src="./data-208-c.js"></script><script src="./data-208-d.js"></script>
+<script src="./data-normalize.js"></script>
+<script src="https://unpkg.com/@googlemaps/markerclusterer/dist/index.min.js" defer></script>
+<script src="./boot-loader.js" defer></script>
 </body>
 </html>
