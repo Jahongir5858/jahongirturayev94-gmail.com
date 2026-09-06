@@ -1,1 +1,3 @@
-missing-secret
+public-preview=running
+bot-api=missing-secret
+channels=kunuz,gazetauz,qalampir
