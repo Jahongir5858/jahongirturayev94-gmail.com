@@ -1,7 +1,8 @@
 import { merge } from 'lodash';
 
+import globalLayers from '../global/layers.json';
 import boundarySources from '../shared/universal-admin-boundaries.json';
-import boundaryViz from '../global/boundary-viz.json';
+import boundaryViz from '../universal/boundary-viz.json';
 import appConfig from './prism.json';
 
 const viz = boundaryViz as Record<string, object>;
@@ -13,15 +14,20 @@ const boundaries = Object.fromEntries(
 );
 
 const rawLayers = {
+  ...globalLayers,
   ...boundaries,
 };
 
 const rawTables = {};
 const rawReports = {};
 
-// English is always provided by PRISM shared translations. Russian is enabled
-// as an additional Central Asia-friendly interface language for this bootstrap.
-const translation = { ru: {} };
+const translation = {
+  fr: {},
+  es: {},
+  ar: {},
+  ru: {},
+  zh: {},
+};
 
 export default {
   appConfig,
@@ -29,5 +35,5 @@ export default {
   rawTables,
   rawReports,
   translation,
-  defaultBoundariesFile: 'adm0_simplified.json',
+  defaultBoundariesFile: 'universal_admin_boundaries_placeholder.json',
 };
