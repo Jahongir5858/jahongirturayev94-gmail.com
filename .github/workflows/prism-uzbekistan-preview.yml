@@ -13,7 +13,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: prism-uzbekistan-live-preview-v2
+  group: prism-uzbekistan-live-preview-v3
   cancel-in-progress: true
 
 jobs:
@@ -29,7 +29,7 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Build current PRISM Uzbekistan
+      - name: Build official PRISM Universal for Uzbekistan
         working-directory: prism-uzbekistan-deploy
         run: npm run build
 
@@ -58,7 +58,7 @@ jobs:
           PY
           nohup python3 /tmp/prism-spa-server.py > /tmp/prism-http.log 2>&1 &
           for i in {1..30}; do
-            if curl -fsS http://127.0.0.1:4173/ >/dev/null 2>&1 && curl -fsS http://127.0.0.1:4173/country/UZB >/dev/null 2>&1; then
+            if curl -fsS http://127.0.0.1:4173/country/UZB >/dev/null 2>&1; then
               echo "PRISM SPA server is responding"
               exit 0
             fi
@@ -72,19 +72,23 @@ jobs:
           set -euo pipefail
           CHROME="$(command -v google-chrome || command -v google-chrome-stable || command -v chromium || true)"
           if [ -z "$CHROME" ]; then
-            echo "Chrome not found on runner; skipping browser smoke test."
-            exit 0
-          fi
-          "$CHROME" --headless --no-sandbox --disable-gpu --disable-dev-shm-usage \
-            --virtual-time-budget=15000 --dump-dom \
-            http://127.0.0.1:4173/country/UZB > /tmp/prism-dom.html 2>/tmp/prism-chrome.log || true
-          if ! grep -q 'id="app"' /tmp/prism-dom.html; then
-            echo "PRISM React app did not mount." >&2
-            tail -100 /tmp/prism-chrome.log >&2 || true
-            head -80 /tmp/prism-dom.html >&2 || true
+            echo "Chrome not found on runner." >&2
             exit 1
           fi
-          echo "PRISM React runtime mounted successfully in headless Chrome."
+          "$CHROME" --headless --no-sandbox --disable-gpu --disable-dev-shm-usage \
+            --ignore-certificate-errors --virtual-time-budget=20000 --dump-dom \
+            http://127.0.0.1:4173/country/UZB > /tmp/prism-dom.html 2>/tmp/prism-chrome.log || true
+          if grep -q '<div id="app"></div>' /tmp/prism-dom.html; then
+            echo "PRISM React root remained empty." >&2
+            tail -120 /tmp/prism-chrome.log >&2 || true
+            exit 1
+          fi
+          if grep -qE 'TypeError:|ReferenceError:|SyntaxError:' /tmp/prism-chrome.log; then
+            echo "JavaScript runtime exception detected." >&2
+            tail -120 /tmp/prism-chrome.log >&2 || true
+            exit 1
+          fi
+          echo "PRISM React UI mounted successfully in headless Chrome."
 
       - name: Install Cloudflare tunnel client
         run: |
@@ -99,7 +103,7 @@ jobs:
             if [ -n "$URL" ]; then
               echo "PUBLIC_URL=$URL" >> "$GITHUB_ENV"
               echo "PUBLIC_URL=$URL"
-              echo "::notice title=PRISM Uzbekistan Live Preview::$URL"
+              echo "::notice title=PRISM Uzbekistan Live Preview::$URL/country/UZB"
               exit 0
             fi
             sleep 2
@@ -116,16 +120,19 @@ jobs:
             fi
             sleep 2
           done
-          CHROME="$(command -v google-chrome || command -v google-chrome-stable || command -v chromium || true)"
-          if [ -n "$CHROME" ]; then
-            "$CHROME" --headless --no-sandbox --disable-gpu --disable-dev-shm-usage \
-              --virtual-time-budget=15000 --dump-dom \
-              "$PUBLIC_URL/country/UZB" > /tmp/prism-public-dom.html 2>/tmp/prism-public-chrome.log || true
-            if ! grep -q 'id="app"' /tmp/prism-public-dom.html; then
-              echo "Public PRISM React app did not mount." >&2
-              tail -100 /tmp/prism-public-chrome.log >&2 || true
-              exit 1
-            fi
+          CHROME="$(command -v google-chrome || command -v google-chrome-stable || command -v chromium)"
+          "$CHROME" --headless --no-sandbox --disable-gpu --disable-dev-shm-usage \
+            --ignore-certificate-errors --virtual-time-budget=20000 --dump-dom \
+            "$PUBLIC_URL/country/UZB" > /tmp/prism-public-dom.html 2>/tmp/prism-public-chrome.log || true
+          if grep -q '<div id="app"></div>' /tmp/prism-public-dom.html; then
+            echo "Public PRISM React root remained empty." >&2
+            tail -120 /tmp/prism-public-chrome.log >&2 || true
+            exit 1
+          fi
+          if grep -qE 'TypeError:|ReferenceError:|SyntaxError:' /tmp/prism-public-chrome.log; then
+            echo "Public JavaScript runtime exception detected." >&2
+            tail -120 /tmp/prism-public-chrome.log >&2 || true
+            exit 1
           fi
           echo "Public PRISM runtime verified: $PUBLIC_URL/country/UZB"
 
