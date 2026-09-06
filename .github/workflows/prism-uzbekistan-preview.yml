@@ -13,7 +13,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: prism-uzbekistan-live-preview
+  group: prism-uzbekistan-live-preview-v2
   cancel-in-progress: true
 
 jobs:
