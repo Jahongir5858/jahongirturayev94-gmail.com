@@ -45,16 +45,36 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           set -euo pipefail
-          projects="$(npx -y wrangler@latest pages project list --json)"
-          if ! printf '%s' "$projects" | node -e '
-            let s="";
-            process.stdin.on("data",d=>s+=d);
-            process.stdin.on("end",()=>{
-              const a=JSON.parse(s);
-              process.exit(a.some(p=>p.name==="prism-uzbekistan") ? 0 : 1);
-            });
-          '; then
-            npx -y wrangler@latest pages project create prism-uzbekistan --production-branch=prism-uzbekistan
+          if [ -z "${CLOUDFLARE_API_TOKEN:-}" ] || [ -z "${CLOUDFLARE_ACCOUNT_ID:-}" ]; then
+            echo "Cloudflare credentials are missing from GitHub Actions secrets." >&2
+            exit 1
+          fi
+
+          api="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/pages/projects/prism-uzbekistan"
+          status="$(curl -sS -o /tmp/cf-project.json -w '%{http_code}' \
+            -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            -H 'Content-Type: application/json' \
+            "$api")"
+
+          if [ "$status" = "200" ]; then
+            echo "Cloudflare Pages project prism-uzbekistan already exists."
+          elif [ "$status" = "404" ]; then
+            echo "Creating Cloudflare Pages project prism-uzbekistan..."
+            create_status="$(curl -sS -o /tmp/cf-create.json -w '%{http_code}' \
+              -X POST \
+              -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+              -H 'Content-Type: application/json' \
+              --data '{"name":"prism-uzbekistan","production_branch":"prism-uzbekistan"}' \
+              "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/pages/projects")"
+            cat /tmp/cf-create.json
+            if [ "$create_status" != "200" ]; then
+              echo "Cloudflare Pages project creation failed with HTTP ${create_status}." >&2
+              exit 1
+            fi
+          else
+            cat /tmp/cf-project.json
+            echo "Cloudflare Pages project lookup failed with HTTP ${status}. The token needs Cloudflare Pages Read/Write access for this account." >&2
+            exit 1
           fi
 
       - name: Deploy to Cloudflare Pages
@@ -62,8 +82,28 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
+          set -euo pipefail
           npx -y wrangler@latest pages deploy dist \
             --project-name=prism-uzbekistan \
             --branch=prism-uzbekistan \
             --commit-hash="${GITHUB_SHA}" \
-            --commit-message="${GITHUB_COMMIT_MESSAGE:-PRISM Uzbekistan deployment}"
+            --commit-message="PRISM Uzbekistan deployment"
+
+      - name: Verify production deployment
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          npx -y wrangler@latest pages deployment list \
+            --project-name=prism-uzbekistan \
+            --environment=production \
+            --json > /tmp/deployments.json
+          node - <<'NODE'
+          const fs = require('fs');
+          const data = JSON.parse(fs.readFileSync('/tmp/deployments.json','utf8'));
+          const list = Array.isArray(data) ? data : (data.result || []);
+          if (!list.length) throw new Error('No production deployment found');
+          const d = list[0];
+          console.log('Production deployment verified:', d.url || d.aliases?.[0] || d.id);
+          NODE
