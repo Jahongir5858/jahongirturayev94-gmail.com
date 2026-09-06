@@ -3,7 +3,9 @@
   "defaultLanguage": "en",
   "WFPAuthRequired": false,
   "alertFormActive": false,
-  "enableNavigationDropdown": false,
+  "universal": true,
+  "multiCountry": true,
+  "enableNavigationDropdown": true,
   "hidePanel": false,
   "serversUrls": {
     "wms": ["https://api.earthobservation.vam.wfp.org/ows/wms"]
