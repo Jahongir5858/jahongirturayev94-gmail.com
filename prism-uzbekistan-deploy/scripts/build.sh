@@ -31,9 +31,19 @@ npx -y yarn@1.22.22 install --frozen-lockfile --network-timeout 600000
 echo "[5/7] Building Uzbekistan frontend..."
 REACT_APP_COUNTRY=uzbekistan npx -y yarn@1.22.22 build
 
-echo "[6/7] Preparing Cloudflare Pages output..."
+echo "[6/7] Preparing static output..."
 cp -a "$SRC_DIR/frontend/build" "$ROOT_DIR/dist"
 printf '/* /index.html 200\n' > "$ROOT_DIR/dist/_redirects"
-printf '{"country":"uzbekistan","upstream":"%s"}\n' "$UPSTREAM_REF" > "$ROOT_DIR/dist/prism-build-meta.json"
+printf '{"country":"uzbekistan","iso3":"UZB","upstream":"%s"}\n' "$UPSTREAM_REF" > "$ROOT_DIR/dist/prism-build-meta.json"
+
+# Open the Uzbekistan country route immediately while keeping a single SPA build.
+node - "$ROOT_DIR/dist/index.html" <<'NODE'
+const fs = require('fs');
+const file = process.argv[2];
+let html = fs.readFileSync(file, 'utf8');
+const redirect = `<script>if(location.pathname==='/'||location.pathname===''){history.replaceState(null,'','/country/UZB'+location.search+location.hash)}</script>`;
+html = html.replace('<title>PRISM</title>', '<title>PRISM Uzbekistan</title>' + redirect);
+fs.writeFileSync(file, html);
+NODE
 
 echo "[7/7] Done. Output: $ROOT_DIR/dist"
