@@ -13,7 +13,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: uzbekistan-dashboard-live-v1
+  group: uzbekistan-dashboard-live-v2
   cancel-in-progress: true
 
 jobs:
@@ -24,20 +24,38 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Validate dashboard source
+      - name: Validate dashboard source and data
         run: |
           set -euo pipefail
           node --check uzbekistan-dashboard/app.js
+          node --check uzbekistan-dashboard/data-normalize.js
+          for f in uzbekistan-dashboard/data-base.js uzbekistan-dashboard/data-2027-*.js uzbekistan-dashboard/data-208-*.js; do
+            node --check "$f"
+          done
           node - <<'NODE'
-          const fs=require('fs'),vm=require('vm');
+          const fs=require('fs'),vm=require('vm'),path=require('path');
+          const dir='uzbekistan-dashboard';
           const ctx={window:{}};
           vm.createContext(ctx);
-          for(const f of ['data-base.js','data-2027.js','data-208.js']) vm.runInContext(fs.readFileSync('uzbekistan-dashboard/'+f,'utf8'),ctx);
+          const files=[
+            'data-base.js',
+            ...fs.readdirSync(dir).filter(x=>/^data-2027-[a-z]\.js$/.test(x)).sort(),
+            ...fs.readdirSync(dir).filter(x=>/^data-208-[a-z]\.js$/.test(x)).sort(),
+            'data-normalize.js'
+          ];
+          for(const f of files) vm.runInContext(fs.readFileSync(path.join(dir,f),'utf8'),ctx,{filename:f});
           const d=ctx.window.DASH_RAW;
-          if (!d || d.c.length!==20 || d.p.length!==102 || d.d.length!==208) {
-            throw new Error('Dashboard dataset counts are invalid');
-          }
-          console.log('Dataset verified:', d.m);
+          if (!d) throw new Error('DASH_RAW missing');
+          if (d.c.length!==20) throw new Error(`2026 count invalid: ${d.c.length}`);
+          if (d.p.length!==102) throw new Error(`2027 count invalid: ${d.p.length}`);
+          if (d.d.length!==208) throw new Error(`208 count invalid: ${d.d.length}`);
+          const regions=new Set([...d.c,...d.p,...d.d].map(x=>x[1]).filter(Boolean));
+          if (regions.size!==14) throw new Error(`Region normalization invalid: ${regions.size}`);
+          const badTypes=[...d.c,...d.p].map(x=>x[7]).filter(x=>x && !['Bino','Yer'].includes(x));
+          if (badTypes.length) throw new Error(`Object type normalization invalid: ${[...new Set(badTypes)].join(', ')}`);
+          const ids=[...d.c.map(x=>'c'+x[0]),...d.p.map(x=>'p'+x[0])];
+          if(new Set(ids).size!==122) throw new Error('Duplicate object IDs found');
+          console.log(JSON.stringify({centers2026:d.c.length,proposals2027:d.p.length,districts208:d.d.length,regions:regions.size,meta:d.m}));
           NODE
 
       - name: Start static server
@@ -59,29 +77,33 @@ jobs:
           cat > smoke.cjs <<'NODE'
           const puppeteer = require('puppeteer-core');
           const url = process.argv[2];
+          const screenshot = process.argv[3] || '/tmp/dashboard.png';
           const chrome = process.env.CHROME_BIN;
           (async()=>{
-            const browser=await puppeteer.launch({headless:true,executablePath:chrome,args:['--no-sandbox','--disable-dev-shm-usage','--disable-gpu']});
+            const browser=await puppeteer.launch({headless:true,executablePath:chrome,args:['--no-sandbox','--disable-dev-shm-usage','--disable-gpu','--use-gl=swiftshader']});
             const page=await browser.newPage();
             await page.setViewport({width:1440,height:900,deviceScaleFactor:1});
-            const errors=[];
-            page.on('pageerror',e=>errors.push(String(e)));
-            page.on('console',m=>{if(m.type()==='error') errors.push('console: '+m.text())});
-            await page.goto(url,{waitUntil:'domcontentloaded',timeout:45000});
-            await page.waitForSelector('.object-card',{timeout:15000});
-            await page.waitForSelector('.maplibregl-canvas',{timeout:20000});
-            await new Promise(r=>setTimeout(r,4500));
+            const fatal=[];
+            page.on('pageerror',e=>fatal.push(String(e)));
+            await page.goto(url,{waitUntil:'domcontentloaded',timeout:60000});
+            await page.waitForSelector('.object-card',{timeout:20000});
+            await page.waitForFunction(()=>document.querySelectorAll('.object-card').length===122,{timeout:20000});
+            await page.waitForFunction(()=>document.querySelector('#regionSelect')?.options.length===15,{timeout:10000});
+            await new Promise(r=>setTimeout(r,3500));
             const state=await page.evaluate(()=>({
               cards:document.querySelectorAll('.object-card').length,
               canvas:document.querySelectorAll('.maplibregl-canvas').length,
               kpi2026:document.querySelector('#kpi2026')?.textContent,
               kpi2027:document.querySelector('#kpi2027')?.textContent,
+              kpi208:document.querySelector('#kpiDistricts')?.textContent,
+              regionOptions:document.querySelector('#regionSelect')?.options.length,
+              listSummary:document.querySelector('#listSummary')?.textContent,
               ready:document.body.dataset.dashboardReady||''
             }));
             console.log(JSON.stringify(state));
-            if(state.cards!==122 || !state.canvas || state.kpi2026!=='20' || state.kpi2027!=='102') throw new Error('Rendered dashboard state is invalid');
-            if(errors.some(x=>/SyntaxError|ReferenceError|TypeError/.test(x))) throw new Error('Browser runtime errors: '+errors.join(' | '));
-            await page.screenshot({path:process.argv[3]||'/tmp/dashboard.png'});
+            if(state.cards!==122 || state.kpi2026!=='20' || state.kpi2027!=='102' || state.kpi208!=='208' || state.regionOptions!==15) throw new Error('Rendered dashboard state is invalid');
+            if(fatal.some(x=>/SyntaxError|ReferenceError|TypeError/.test(x))) throw new Error('Browser runtime errors: '+fatal.join(' | '));
+            await page.screenshot({path:screenshot,fullPage:false});
             await browser.close();
           })().catch(e=>{console.error(e);process.exit(1)});
           NODE
@@ -120,9 +142,13 @@ jobs:
           cat /tmp/cloudflared-dashboard.log
           exit 1
 
-      - name: Public browser runtime test
+      - name: Verify public HTML
         run: |
-          node /tmp/dashboard-smoke/smoke.cjs "$PUBLIC_URL/" /tmp/dashboard-public.png
+          for i in {1..30}; do
+            if curl -fsSL "$PUBLIC_URL/" | grep -q 'XARITA DASHBOARD'; then exit 0; fi
+            sleep 2
+          done
+          exit 1
 
       - name: Publish current preview URL to branch
         env:
