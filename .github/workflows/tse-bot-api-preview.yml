@@ -8,6 +8,7 @@ on:
     paths:
       - 'telegram_bot_api_collector.py'
       - 'telegram_public_preview_collector.py'
+      - 'tse_home_page.tsx'
       - '.github/workflows/tse-bot-api-preview.yml'
 
 permissions:
@@ -29,6 +30,9 @@ jobs:
 
       - name: Clone Telegram Search Engine
         run: git clone --depth 1 https://github.com/Brooksolomon/Telegram-Search-Engine.git tse
+
+      - name: Install Uzbekistan live home page
+        run: cp tse_home_page.tsx tse/web/src/app/page.tsx
 
       - name: Configure preview environment
         working-directory: tse
@@ -87,17 +91,17 @@ jobs:
           echo "BOT_API_STATUS=running" >> "$GITHUB_ENV"
           sed -n '1,40p' /tmp/tg-bot-api-collector.log || true
 
-      - name: Verify seeded channels through API
+      - name: Verify seeded channels through API and home page
         run: |
           curl -fsS 'http://localhost/api/search?q=kun&limit=10' | tee /tmp/search-kun.json
           python - <<'PY'
           import json
-          p='/tmp/search-kun.json'
-          data=json.load(open(p, encoding='utf-8'))
+          data=json.load(open('/tmp/search-kun.json', encoding='utf-8'))
           if not isinstance(data, list) or not data:
               raise SystemExit('Seeded channel was not returned by search API')
           print('Search API returned', len(data), 'channel(s)')
           PY
+          curl -fsS http://localhost/ | grep -q 'real kanallar'
 
       - name: Install Cloudflare tunnel client
         run: |
@@ -122,7 +126,7 @@ jobs:
       - name: Publish preview status to branch
         run: |
           printf '%s\n' "$PUBLIC_URL" > tse-bot-api-preview-url.txt
-          printf 'public-preview=%s\nbot-api=%s\nchannels=%s\n' "$PUBLIC_PREVIEW_STATUS" "$BOT_API_STATUS" "$PUBLIC_TG_CHANNELS" > tse-bot-api-status.txt
+          printf 'public-preview=%s\nbot-api=%s\nchannels=%s\nhome=live-channel-cards\n' "$PUBLIC_PREVIEW_STATUS" "$BOT_API_STATUS" "$PUBLIC_TG_CHANNELS" > tse-bot-api-status.txt
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add tse-bot-api-preview-url.txt tse-bot-api-status.txt
