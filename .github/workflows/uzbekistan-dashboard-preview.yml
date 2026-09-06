@@ -99,6 +99,28 @@ jobs:
           done
           cat /tmp/tunnel.log; exit 1
 
+      - name: Wait for public DNS and HTTP
+        run: |
+          set -euo pipefail
+          HOST=${PUBLIC_URL#https://}
+          READY=0
+          for i in {1..90}; do
+            if getent ahostsv4 "$HOST" >/dev/null 2>&1; then
+              if curl -fsSL --max-time 15 --retry 1 "$PUBLIC_URL/" | grep -q 'Monitoring xaritasi'; then
+                READY=1
+                echo "Public preview is reachable: $PUBLIC_URL"
+                break
+              fi
+            fi
+            echo "Waiting for Quick Tunnel DNS/HTTP ($i/90)..."
+            sleep 2
+          done
+          if [ "$READY" != "1" ]; then
+            echo "Public preview did not become reachable"
+            cat /tmp/tunnel.log
+            exit 1
+          fi
+
       - name: Public browser runtime test
         run: node /tmp/smoke/smoke.cjs "$PUBLIC_URL/" /tmp/dashboard-public.png
 
