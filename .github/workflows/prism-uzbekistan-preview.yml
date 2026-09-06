@@ -1,0 +1,98 @@
+name: PRISM Uzbekistan Live Preview
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - prism-uzbekistan
+    paths:
+      - '.github/workflows/prism-uzbekistan-preview.yml'
+
+permissions:
+  actions: read
+  contents: write
+
+concurrency:
+  group: prism-uzbekistan-live-preview
+  cancel-in-progress: true
+
+jobs:
+  preview:
+    runs-on: ubuntu-latest
+    timeout-minutes: 340
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download verified PRISM Uzbekistan build
+        uses: actions/download-artifact@v4
+        with:
+          name: prism-uzbekistan-dist
+          path: dist
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          run-id: 34046982149
+
+      - name: Start PRISM static server
+        run: |
+          nohup python3 -m http.server 4173 --directory dist > /tmp/prism-http.log 2>&1 &
+          for i in {1..30}; do
+            if curl -fsS http://127.0.0.1:4173/ >/dev/null 2>&1; then
+              echo "PRISM local server is responding"
+              exit 0
+            fi
+            sleep 2
+          done
+          cat /tmp/prism-http.log
+          exit 1
+
+      - name: Install Cloudflare tunnel client
+        run: |
+          curl -L --fail --retry 3 -o cloudflared https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64
+          chmod +x cloudflared
+
+      - name: Open public Cloudflare Quick Tunnel
+        run: |
+          nohup ./cloudflared tunnel --url http://127.0.0.1:4173 --no-autoupdate > /tmp/cloudflared.log 2>&1 &
+          for i in {1..90}; do
+            URL=$(grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' /tmp/cloudflared.log | head -n1 || true)
+            if [ -n "$URL" ]; then
+              echo "PUBLIC_URL=$URL" >> "$GITHUB_ENV"
+              echo "PUBLIC_URL=$URL"
+              echo "::notice title=PRISM Uzbekistan Live Preview::$URL"
+              exit 0
+            fi
+            sleep 2
+          done
+          cat /tmp/cloudflared.log
+          exit 1
+
+      - name: Verify public PRISM URL
+        run: |
+          for i in {1..30}; do
+            if curl -fsSL "$PUBLIC_URL/" -o /tmp/prism-public.html && grep -qi '<html' /tmp/prism-public.html; then
+              echo "Public PRISM URL verified: $PUBLIC_URL"
+              exit 0
+            fi
+            sleep 2
+          done
+          exit 1
+
+      - name: Publish current preview URL to branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          CONTENT=$(printf '%s\n' "$PUBLIC_URL" | base64 -w0)
+          API="https://api.github.com/repos/${GITHUB_REPOSITORY}/contents/prism-preview-url.txt"
+          SHA=$(curl -fsS -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" "$API?ref=${GITHUB_REF_NAME}" 2>/dev/null | jq -r '.sha // empty' || true)
+          BODY=$(jq -n --arg message "Update PRISM Uzbekistan preview URL" --arg content "$CONTENT" --arg branch "$GITHUB_REF_NAME" --arg sha "$SHA" '{message:$message, content:$content, branch:$branch} + (if $sha != "" then {sha:$sha} else {} end)')
+          curl -fsS -X PUT -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28" "$API" -d "$BODY" >/dev/null
+          echo "Published $PUBLIC_URL"
+
+      - name: Keep preview online
+        run: |
+          echo "PRISM Uzbekistan preview: $PUBLIC_URL"
+          while true; do
+            sleep 240
+            curl -fsS http://127.0.0.1:4173/ >/dev/null || exit 1
+          done
