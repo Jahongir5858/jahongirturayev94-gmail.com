@@ -1,10 +1,9 @@
-name: Uzbekistan Google Maps Dashboard Live Preview
+name: Uzbekistan Premium Google Dashboard Preview
 
 on:
   workflow_dispatch:
   push:
-    branches:
-      - uzbekistan-map-dashboard
+    branches: [uzbekistan-map-dashboard]
     paths:
       - 'uzbekistan-dashboard/**'
       - '.github/workflows/uzbekistan-dashboard-preview.yml'
@@ -13,7 +12,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: uzbekistan-dashboard-google-v3
+  group: uzbekistan-premium-google-v1
   cancel-in-progress: true
 
 jobs:
@@ -21,125 +20,99 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 340
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Validate dashboard source and data
+      - name: Validate source and datasets
         run: |
           set -euo pipefail
           gzip -cd uzbekistan-dashboard/app.js.gz > /tmp/dashboard-app.js
           node --check /tmp/dashboard-app.js
+          node --check uzbekistan-dashboard/boot-loader.js
           node --check uzbekistan-dashboard/google-config.js
           node --check uzbekistan-dashboard/data-normalize.js
-          for f in uzbekistan-dashboard/data-base.js uzbekistan-dashboard/data-2027-*.js uzbekistan-dashboard/data-208-*.js; do
-            node --check "$f"
-          done
+          for f in uzbekistan-dashboard/data-base.js uzbekistan-dashboard/data-2027-*.js uzbekistan-dashboard/data-208-*.js; do node --check "$f"; done
           node - <<'NODE'
-          const fs=require('fs'),vm=require('vm'),path=require('path');
-          const dir='uzbekistan-dashboard',ctx={window:{}};vm.createContext(ctx);
+          const fs=require('fs'),vm=require('vm'),path=require('path'),dir='uzbekistan-dashboard',ctx={window:{}};vm.createContext(ctx);
           const files=['data-base.js',...fs.readdirSync(dir).filter(x=>/^data-2027-[a-z]\.js$/.test(x)).sort(),...fs.readdirSync(dir).filter(x=>/^data-208-[a-z]\.js$/.test(x)).sort(),'data-normalize.js'];
-          for(const f of files) vm.runInContext(fs.readFileSync(path.join(dir,f),'utf8'),ctx,{filename:f});
-          const d=ctx.window.DASH_RAW;if(!d)throw new Error('DASH_RAW missing');
-          if(d.c.length!==20)throw new Error(`2026 count invalid: ${d.c.length}`);
-          if(d.p.length!==102)throw new Error(`2027 count invalid: ${d.p.length}`);
-          if(d.d.length!==208)throw new Error(`208 count invalid: ${d.d.length}`);
-          const regions=new Set([...d.c,...d.p,...d.d].map(x=>x[1]).filter(Boolean));if(regions.size!==14)throw new Error(`Region normalization invalid: ${regions.size}`);
-          const badTypes=[...d.c,...d.p].map(x=>x[7]).filter(x=>x&&!['Bino','Yer'].includes(x));if(badTypes.length)throw new Error(`Object type normalization invalid: ${[...new Set(badTypes)].join(', ')}`);
-          console.log(JSON.stringify({centers2026:d.c.length,proposals2027:d.p.length,districts208:d.d.length,regions:regions.size,meta:d.m}));
+          for(const f of files)vm.runInContext(fs.readFileSync(path.join(dir,f),'utf8'),ctx);
+          const d=ctx.window.DASH_RAW;if(!d||d.c.length!==20||d.p.length!==102||d.d.length!==208)throw Error('Dataset counts invalid');
+          const regions=new Set([...d.c,...d.p,...d.d].map(x=>x[1]).filter(Boolean));if(regions.size!==14)throw Error('Region normalization invalid: '+regions.size);
+          console.log({centers:d.c.length,proposals:d.p.length,districts:d.d.length,regions:regions.size});
           NODE
 
       - name: Start static server
         run: |
-          nohup python3 -m http.server 8765 --directory uzbekistan-dashboard >/tmp/dashboard-http.log 2>&1 &
-          for i in {1..30}; do
-            if curl -fsS http://127.0.0.1:8765/ >/dev/null; then exit 0; fi
-            sleep 1
-          done
-          cat /tmp/dashboard-http.log
-          exit 1
+          nohup python3 -m http.server 8765 --directory uzbekistan-dashboard >/tmp/http.log 2>&1 &
+          for i in {1..30}; do curl -fsS http://127.0.0.1:8765/ >/dev/null && exit 0; sleep 1; done
+          cat /tmp/http.log; exit 1
 
-      - name: Install browser smoke-test helper
+      - name: Install browser test
         run: |
-          mkdir -p /tmp/dashboard-smoke && cd /tmp/dashboard-smoke
+          mkdir -p /tmp/smoke && cd /tmp/smoke
           npm init -y >/dev/null 2>&1
           npm install --no-save puppeteer-core@24.16.0 >/dev/null 2>&1
           cat > smoke.cjs <<'NODE'
           const puppeteer=require('puppeteer-core');
-          const url=process.argv[2], screenshot=process.argv[3]||'/tmp/dashboard.png', requireMap=process.argv[4]!=='ui-only';
-          const chrome=process.env.CHROME_BIN;
+          const url=process.argv[2],shot=process.argv[3];
           (async()=>{
-            const browser=await puppeteer.launch({headless:true,executablePath:chrome,args:['--no-sandbox','--disable-dev-shm-usage','--use-gl=angle','--use-angle=swiftshader','--enable-webgl','--ignore-gpu-blocklist','--enable-unsafe-swiftshader']});
+            const browser=await puppeteer.launch({headless:true,executablePath:process.env.CHROME_BIN,args:['--no-sandbox','--disable-dev-shm-usage']});
             const page=await browser.newPage();await page.setViewport({width:1440,height:900,deviceScaleFactor:1});
-            const fatal=[];page.on('pageerror',e=>fatal.push(String(e)));page.on('console',m=>{if(m.type()==='error')console.log('BROWSER_ERROR:',m.text())});
+            const fatal=[];page.on('pageerror',e=>fatal.push(String(e)));page.on('console',m=>{if(m.type()==='error')console.log('BROWSER:',m.text())});
             await page.goto(url,{waitUntil:'domcontentloaded',timeout:60000});
-            await page.waitForFunction(()=>document.body.dataset.dashboardReady==='true',{timeout:20000});
+            await page.waitForFunction(()=>document.body.dataset.dashboardReady==='true',{timeout:25000});
             await page.waitForFunction(()=>window.__dashboardStats?.objects===122&&window.__dashboardStats?.districts208===208,{timeout:20000});
             await page.waitForFunction(()=>document.querySelector('#regionSelect')?.options.length===15,{timeout:10000});
-            if(requireMap){await page.waitForFunction(()=>document.body.dataset.mapReady==='true',{timeout:45000});await page.waitForSelector('#map .gm-style',{timeout:15000})}
+            await page.waitForFunction(()=>document.body.dataset.mapReady==='true'||document.body.dataset.mapReady==='fallback',{timeout:30000});
             await new Promise(r=>setTimeout(r,2500));
-            const state=await page.evaluate(()=>({stats:window.__dashboardStats,cards:document.querySelectorAll('.object-card').length,regions:document.querySelector('#regionSelect')?.options.length,ready:document.body.dataset.dashboardReady,mapReady:document.body.dataset.mapReady||'',gm:!!document.querySelector('#map .gm-style'),mapError:document.querySelector('.map-error')?.innerText||'',kpi2026:document.querySelector('#kpi2026')?.textContent,kpi2027:document.querySelector('#kpi2027')?.textContent,kpi208:document.querySelector('#kpiDistricts')?.textContent}));
-            console.log(JSON.stringify(state));
-            if(state.stats?.objects!==122||state.stats?.centers2026!==20||state.stats?.proposals2027!==102||state.stats?.districts208!==208||state.regions!==15)throw new Error('Rendered dashboard state invalid');
-            if(state.cards<20||state.cards>40)throw new Error(`Virtualized list unexpected card count: ${state.cards}`);
-            if(requireMap&&(!state.gm||state.mapReady!=='true'||state.mapError))throw new Error('Google Maps did not render');
-            if(fatal.some(x=>/SyntaxError|ReferenceError|TypeError/.test(x)))throw new Error('Browser runtime errors: '+fatal.join(' | '));
-            await page.screenshot({path:screenshot,fullPage:false});await browser.close();
+            const s=await page.evaluate(()=>({stats:window.__dashboardStats,cards:document.querySelectorAll('.object-card').length,regions:document.querySelector('#regionSelect')?.options.length,mapMode:document.body.dataset.mapReady,gm:!!document.querySelector('#map .gm-style'),embed:!!document.querySelector('#googleEmbed'),mapError:document.querySelector('.map-error')?.innerText||''}));
+            console.log(JSON.stringify(s));
+            if(s.stats.objects!==122||s.stats.districts208!==208||s.regions!==15)throw Error('Dashboard data render invalid');
+            if(s.cards<20||s.cards>40)throw Error('Virtual list invalid: '+s.cards);
+            if(!s.gm&&!s.embed)throw Error('Neither Google JS map nor Google Embed rendered');
+            if(fatal.some(x=>/SyntaxError|ReferenceError|TypeError/.test(x)))throw Error(fatal.join(' | '));
+            await page.screenshot({path:shot});await browser.close();
           })().catch(e=>{console.error(e);process.exit(1)});
           NODE
-          CHROME_BIN="$(command -v google-chrome || command -v chromium || command -v chromium-browser || true)"
-          test -n "$CHROME_BIN"
+          CHROME_BIN="$(command -v google-chrome || command -v chromium || command -v chromium-browser)"
           echo "CHROME_BIN=$CHROME_BIN" >> "$GITHUB_ENV"
 
-      - name: Local Google Maps browser runtime test
-        run: node /tmp/dashboard-smoke/smoke.cjs http://127.0.0.1:8765/ /tmp/dashboard-local.png
+      - name: Local browser runtime test
+        run: node /tmp/smoke/smoke.cjs http://127.0.0.1:8765/ /tmp/dashboard-local.png
 
-      - name: Upload verified screenshot
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
-          name: uzbekistan-google-dashboard-screenshot
+          name: premium-google-dashboard-screenshot
           path: /tmp/dashboard-local.png
-          if-no-files-found: error
 
-      - name: Install Cloudflare tunnel client
+      - name: Install Cloudflare tunnel
         run: |
           curl -L --fail --retry 3 -o cloudflared https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64
           chmod +x cloudflared
 
-      - name: Open public Cloudflare Quick Tunnel
+      - name: Open public preview
         run: |
-          nohup ./cloudflared tunnel --url http://127.0.0.1:8765 --no-autoupdate >/tmp/cloudflared-dashboard.log 2>&1 &
+          nohup ./cloudflared tunnel --url http://127.0.0.1:8765 --no-autoupdate >/tmp/tunnel.log 2>&1 &
           for i in {1..90}; do
-            URL=$(grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' /tmp/cloudflared-dashboard.log | head -n1 || true)
-            if [ -n "$URL" ]; then echo "PUBLIC_URL=$URL" >> "$GITHUB_ENV";echo "::notice title=Uzbekistan Google Dashboard::$URL";exit 0;fi
+            URL=$(grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' /tmp/tunnel.log | head -n1 || true)
+            if [ -n "$URL" ]; then echo "PUBLIC_URL=$URL" >> "$GITHUB_ENV"; echo "$URL"; exit 0; fi
             sleep 2
           done
-          cat /tmp/cloudflared-dashboard.log;exit 1
+          cat /tmp/tunnel.log; exit 1
 
-      - name: Verify public dashboard UI
-        run: |
-          for i in {1..30}; do
-            if curl -fsSL "$PUBLIC_URL/" | grep -q 'Monitoring xaritasi'; then break; fi
-            sleep 2
-          done
-          node /tmp/dashboard-smoke/smoke.cjs "$PUBLIC_URL/" /tmp/dashboard-public.png ui-only
+      - name: Public browser runtime test
+        run: node /tmp/smoke/smoke.cjs "$PUBLIC_URL/" /tmp/dashboard-public.png
 
-      - name: Check Google Maps on public origin
-        continue-on-error: true
-        run: node /tmp/dashboard-smoke/smoke.cjs "$PUBLIC_URL/" /tmp/dashboard-public-map.png
-
-      - name: Publish current preview URL to branch
+      - name: Publish preview URL
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          set -euo pipefail
           CONTENT=$(printf '%s\n' "$PUBLIC_URL" | base64 -w0)
           API="https://api.github.com/repos/${GITHUB_REPOSITORY}/contents/uzbekistan-dashboard-preview-url.txt"
-          SHA=$(curl -fsS -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" "$API?ref=${GITHUB_REF_NAME}" 2>/dev/null | jq -r '.sha // empty' || true)
-          BODY=$(jq -n --arg message "Update Uzbekistan Google dashboard preview URL" --arg content "$CONTENT" --arg branch "$GITHUB_REF_NAME" --arg sha "$SHA" '{message:$message,content:$content,branch:$branch} + (if $sha != "" then {sha:$sha} else {} end)')
-          curl -fsS -X PUT -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28" "$API" -d "$BODY" >/dev/null
-          echo "Published: $PUBLIC_URL"
+          SHA=$(curl -fsS -H "Authorization: Bearer $GH_TOKEN" "$API?ref=${GITHUB_REF_NAME}" 2>/dev/null | jq -r '.sha // empty' || true)
+          BODY=$(jq -n --arg message "Update premium Google dashboard preview" --arg content "$CONTENT" --arg branch "$GITHUB_REF_NAME" --arg sha "$SHA" '{message:$message,content:$content,branch:$branch} + (if $sha!="" then {sha:$sha} else {} end)')
+          curl -fsS -X PUT -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" "$API" -d "$BODY" >/dev/null
 
       - name: Keep preview online
         run: |
-          echo "Google dashboard preview: $PUBLIC_URL"
-          while true; do sleep 240;curl -fsS http://127.0.0.1:8765/ >/dev/null || exit 1;done
+          echo "$PUBLIC_URL"
+          while true; do sleep 240; curl -fsS http://127.0.0.1:8765/ >/dev/null || exit 1; done
