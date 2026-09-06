@@ -1,3 +1,4 @@
 public-preview=running
 bot-api=missing-secret
 channels=kunuz,gazetauz,qalampir
+home=live-channel-cards
