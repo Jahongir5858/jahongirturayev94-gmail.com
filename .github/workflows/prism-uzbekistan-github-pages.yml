@@ -1,0 +1,50 @@
+name: Deploy PRISM Uzbekistan to GitHub Pages
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - prism-uzbekistan
+    paths:
+      - '.github/workflows/prism-uzbekistan-github-pages.yml'
+
+permissions:
+  actions: read
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: prism-uzbekistan-github-pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Download verified PRISM Uzbekistan build
+        uses: actions/download-artifact@v4
+        with:
+          name: prism-uzbekistan-dist
+          path: dist
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          run-id: 34046982149
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+        with:
+          enablement: true
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
