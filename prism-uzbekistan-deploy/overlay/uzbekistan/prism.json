@@ -1,0 +1,34 @@
+{
+  "country": "Uzbekistan",
+  "defaultLanguage": "en",
+  "WFPAuthRequired": false,
+  "alertFormActive": false,
+  "enableNavigationDropdown": false,
+  "hidePanel": false,
+  "serversUrls": {
+    "wms": ["https://api.earthobservation.vam.wfp.org/ows/wms"]
+  },
+  "map": {
+    "boundingBox": [55.998, 37.172, 73.148, 45.591]
+  },
+  "defaultDisplayBoundaries": [
+    "universal_admin2_boundaries",
+    "universal_admin1_boundaries",
+    "universal_admin0_boundaries"
+  ],
+  "categories": {
+    "rainfall": {
+      "rainfall_amount": ["rainfall_dekad", "rainfall_agg_1month"],
+      "rainfall_anomalies": ["rain_anomaly_dekad", "spi_1m"]
+    },
+    "vegetation": {
+      "vegetation_conditions": ["ndvi_dekad", "ndvi_dekad_anomaly"]
+    },
+    "temperature": {
+      "land_surface_temperature": ["lst_daytime", "lst_nighttime"]
+    },
+    "exposure": {
+      "population": ["population"]
+    }
+  }
+}

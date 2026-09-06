@@ -1,0 +1,36 @@
+name: Build PRISM Uzbekistan
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - prism-uzbekistan
+    paths:
+      - 'prism-uzbekistan-deploy/**'
+      - '.github/workflows/prism-uzbekistan-build.yml'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    defaults:
+      run:
+        working-directory: prism-uzbekistan-deploy
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Use Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Build Uzbekistan PRISM
+        run: npm run build
+
+      - name: Upload static build
+        uses: actions/upload-artifact@v4
+        with:
+          name: prism-uzbekistan-dist
+          path: prism-uzbekistan-deploy/dist
+          if-no-files-found: error
