@@ -17,7 +17,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 350
     env:
-      BOT_TOKEN: ${{ secrets.TG_SEARCH_BOT_TOKEN }}
+      BOT_TOKEN: ${{ secrets.TG_SEARCH_BOT_TOKEN || secrets.BOT_TOKEN }}
       DATABASE_URL: postgresql://tgsearch:preview-postgres-9f3c7b1a@127.0.0.1:5432/tgsearch
     steps:
       - name: Checkout control repository
@@ -65,7 +65,7 @@ jobs:
           python -m pip install --disable-pip-version-check --quiet 'psycopg[binary]>=3.2,<4'
           if [ -z "$BOT_TOKEN" ]; then
             echo "BOT_API_STATUS=missing-secret" >> "$GITHUB_ENV"
-            echo "TG_SEARCH_BOT_TOKEN secret is not configured; web preview will start without ingestion."
+            echo "No TG_SEARCH_BOT_TOKEN or BOT_TOKEN secret is configured; web preview will start without ingestion."
             exit 0
           fi
           nohup python telegram_bot_api_collector.py > /tmp/tg-bot-api-collector.log 2>&1 &
@@ -124,4 +124,4 @@ jobs:
             fi
           done
 
-# restart marker: 2026-09-06
+# restart marker: 2026-09-06 fallback-token-check
