@@ -29,6 +29,7 @@ jobs:
           set -euo pipefail
           node --check uzbekistan-dashboard/app.js
           node --check uzbekistan-dashboard/data-normalize.js
+          node --check uzbekistan-dashboard/map-style-fallback.js
           for f in uzbekistan-dashboard/data-base.js uzbekistan-dashboard/data-2027-*.js uzbekistan-dashboard/data-208-*.js; do
             node --check "$f"
           done
@@ -80,19 +81,35 @@ jobs:
           const screenshot = process.argv[3] || '/tmp/dashboard.png';
           const chrome = process.env.CHROME_BIN;
           (async()=>{
-            const browser=await puppeteer.launch({headless:true,executablePath:chrome,args:['--no-sandbox','--disable-dev-shm-usage','--disable-gpu','--use-gl=swiftshader']});
+            const browser=await puppeteer.launch({
+              headless:true,
+              executablePath:chrome,
+              args:[
+                '--no-sandbox',
+                '--disable-dev-shm-usage',
+                '--use-gl=angle',
+                '--use-angle=swiftshader',
+                '--enable-webgl',
+                '--ignore-gpu-blocklist',
+                '--enable-unsafe-swiftshader'
+              ]
+            });
             const page=await browser.newPage();
             await page.setViewport({width:1440,height:900,deviceScaleFactor:1});
             const fatal=[];
             page.on('pageerror',e=>fatal.push(String(e)));
+            page.on('console',m=>{ if(m.type()==='error') console.log('BROWSER_CONSOLE_ERROR:',m.text()); });
             await page.goto(url,{waitUntil:'domcontentloaded',timeout:60000});
             await page.waitForSelector('.object-card',{timeout:20000});
             await page.waitForFunction(()=>document.querySelectorAll('.object-card').length===122,{timeout:20000});
             await page.waitForFunction(()=>document.querySelector('#regionSelect')?.options.length===15,{timeout:10000});
-            await new Promise(r=>setTimeout(r,3500));
+            await page.waitForSelector('.maplibregl-canvas',{timeout:30000});
+            await page.waitForFunction(()=>document.body.dataset.dashboardReady==='true' && !document.querySelector('.map-fallback'),{timeout:30000});
+            await new Promise(r=>setTimeout(r,5000));
             const state=await page.evaluate(()=>({
               cards:document.querySelectorAll('.object-card').length,
               canvas:document.querySelectorAll('.maplibregl-canvas').length,
+              fallback:!!document.querySelector('.map-fallback'),
               kpi2026:document.querySelector('#kpi2026')?.textContent,
               kpi2027:document.querySelector('#kpi2027')?.textContent,
               kpi208:document.querySelector('#kpiDistricts')?.textContent,
@@ -102,6 +119,7 @@ jobs:
             }));
             console.log(JSON.stringify(state));
             if(state.cards!==122 || state.kpi2026!=='20' || state.kpi2027!=='102' || state.kpi208!=='208' || state.regionOptions!==15) throw new Error('Rendered dashboard state is invalid');
+            if(state.canvas<1 || state.fallback || state.ready!=='true') throw new Error('MapLibre canvas did not render');
             if(fatal.some(x=>/SyntaxError|ReferenceError|TypeError/.test(x))) throw new Error('Browser runtime errors: '+fatal.join(' | '));
             await page.screenshot({path:screenshot,fullPage:false});
             await browser.close();
